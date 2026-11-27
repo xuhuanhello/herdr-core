@@ -38,7 +38,6 @@ jobs:
   # Fast formatting/advisory checks and Windows clippy from Linux
   # (zig stubbed: type-checking needs no libghostty-vt).
   lint:
-    if: github.repository != 'xuhuanhello/herdr-core'
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
