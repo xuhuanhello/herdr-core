@@ -45,7 +45,7 @@ fn check_update_session(paths: &Paths) -> Result<(), RpcError> {
             return Err(RpcError::new(
                 "refused",
                 "another Core is running in this session",
-                &format!("use the Core from {releases} after the other Core exits"),
+                format!("use the Core from {releases} after the other Core exits"),
             ));
         }
     }
