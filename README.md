@@ -5,7 +5,17 @@ Agents can start other agents, send them work, and hear back; you can attach to 
 
 Core draws nothing. Use it from your shell, an agent, or your own app.
 
+## Personal fork
+
+This fork builds Core for Apple Silicon and Windows x64. Download packages and
+SHA-256 checksums from [this fork's GitHub Releases](https://github.com/xuhuanhello/herdr-core/releases).
+The matching [desktop App fork](https://github.com/xuhuanhello/herdr-app) can
+install and verify Core for you. These builds report `+fork.xuhuanhello.N`
+and use this repository's Releases for `hc update`.
+
 ## Install
+
+The commands in this section install the upstream distribution.
 
 Linux and macOS:
 

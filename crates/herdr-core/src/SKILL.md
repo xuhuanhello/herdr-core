@@ -233,6 +233,10 @@ paths start at your current folder. Prefer explicit paths for remote work.
 
 ## Status, recovery, and cleanup
 
+Core versions ending in `+fork.xuhuanhello.N` use the personal fork's GitHub
+Releases for `hc update`. Let the person choose when to update. Check the
+running Core's version if its executable and running daemon may differ.
+
 - State is `live` or `finished`. Status comes from the program's OSC 7501
   reports: `idle`, `working`, `done`, `blocked`, `error`; plain programs
   report none. Do not guess status from screen text.

@@ -26,7 +26,7 @@ use server::*;
 use update::*;
 
 #[derive(Parser)]
-#[command(name = "hc", version, about = "herdr-core: a terminal runtime for coding agents")]
+#[command(name = "hc", version = crate::releases::VERSION, about = "herdr-core: a terminal runtime for coding agents")]
 struct Cli {
     /// JSON output even in a terminal.
     #[arg(long, global = true)]
@@ -587,7 +587,7 @@ fn run(cmd: Option<Cmd>, json: bool, asked: bool) -> Result<Option<Out>, RpcErro
         }
         Cmd::Server { action: ServerCmd::Stop } => stop(&paths)?,
         Cmd::Update { from: None, version, force } => {
-            let this = format!("hc {}", env!("CARGO_PKG_VERSION"));
+            let this = format!("hc {}", crate::releases::VERSION);
             if let Some(v) = &version
                 && !force
                 && !older(&this, &format!("hc {v}"))
@@ -600,7 +600,7 @@ fn run(cmd: Option<Cmd>, json: bool, asked: bool) -> Result<Option<Out>, RpcErro
             let scratch = crate::releases::Scratch::new()?;
             let requested = version
                 .as_deref()
-                .map(|v| if !force && !older(&this, &format!("hc {v}")) { env!("CARGO_PKG_VERSION") } else { v });
+                .map(|v| if !force && !older(&this, &format!("hc {v}")) { crate::releases::VERSION } else { v });
             let m = crate::releases::manifest(requested, &scratch.0)?;
             // Apps and scripts built for this generation would break on another one.
             if m.generation != crate::api::GENERATION && !force {
@@ -629,6 +629,11 @@ fn run(cmd: Option<Cmd>, json: bool, asked: bool) -> Result<Option<Out>, RpcErro
                     &scratch.0,
                     crate::platform::prefer_release_bundle(),
                 )?;
+                if crate::releases::FORK_RELEASES.is_some()
+                    && version_of(&file).as_deref() != Some(&format!("hc {}", m.version))
+                {
+                    return Err(RpcError::new("refused", "the Core version does not match the release manifest", ""));
+                }
                 let mut out = update(&paths, &file, force)?;
                 out.json["release"] = m.version.into();
                 out

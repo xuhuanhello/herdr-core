@@ -11,6 +11,11 @@ pub(super) fn version_of(path: &std::path::Path) -> Option<String> {
 
 /// A release name for `--version`: `0.1.4` (it goes into a URL).
 pub(super) fn release_version(s: &str) -> Result<String, String> {
+    if crate::releases::FORK_RELEASES.is_some() {
+        return crate::releases::fork_build(s)
+            .map(|_| s.into())
+            .ok_or_else(|| format!("expected a fork release like 0.1.22+fork.xuhuanhello.1, got {s:?}"));
+    }
     let parts: Vec<&str> = s.split('.').collect();
     let number = |p: &&str| !p.is_empty() && p.bytes().all(|b| b.is_ascii_digit());
     if parts.len() == 3 && parts.iter().all(number) {
@@ -22,16 +27,36 @@ pub(super) fn release_version(s: &str) -> Result<String, String> {
 
 /// `hc 0.1.9` is older than `hc 0.2.0`; anything unparsed is not older.
 pub(super) fn older(a: &str, b: &str) -> bool {
+    if let (Some(a), Some(b)) = (crate::releases::fork_build(a), crate::releases::fork_build(b)) {
+        return a < b;
+    }
     let parts = |v: &str| -> Option<Vec<u64>> {
         v.strip_prefix("hc ")?.split(['.', '-']).take(3).map(|p| p.parse().ok()).collect()
     };
     matches!((parts(a), parts(b)), (Some(a), Some(b)) if a < b)
 }
 
+fn check_update_session(paths: &Paths) -> Result<(), RpcError> {
+    if let Some(releases) = crate::releases::FORK_RELEASES
+        && let Some(stream) = client::connect_existing(paths)
+    {
+        let status = client::call(&stream, "server.status", json!({}))?;
+        if crate::releases::fork_build(status["version"].as_str().unwrap_or_default()).is_none() {
+            return Err(RpcError::new(
+                "refused",
+                "another Core is running in this session",
+                &format!("use the Core from {releases} after the other Core exits"),
+            ));
+        }
+    }
+    Ok(())
+}
+
 /// The installed binary can be current while a core started before it was
 /// replaced is still running. Do not start a core just to check its version.
 pub(super) fn up_to_date(paths: &Paths, release: &str, human: String) -> Result<Out, RpcError> {
-    let this = format!("hc {}", env!("CARGO_PKG_VERSION"));
+    check_update_session(paths)?;
+    let this = format!("hc {}", crate::releases::VERSION);
     let mut out = Out { json: json!({"release": release, "now": this, "updated": false}), human };
     if let Some(stream) = client::connect_existing(paths) {
         let status = client::call(&stream, "server.status", json!({}))?;
@@ -51,6 +76,7 @@ pub(super) fn up_to_date(paths: &Paths, release: &str, human: String) -> Result<
 /// the planned way: every terminal keeps running. One swap path, for people
 /// and for apps that bundle hc.
 pub(super) fn update(paths: &Paths, from: &std::path::Path, force: bool) -> Result<Out, RpcError> {
+    check_update_session(paths)?;
     let source = crate::platform::update_source(from);
     let from = source.as_path();
     let refused = |why: String, hint: &str| RpcError::new("refused", why, hint);
@@ -70,8 +96,13 @@ pub(super) fn update(paths: &Paths, from: &std::path::Path, force: bool) -> Resu
         };
         return Err(refused(format!("{shown} belongs to {manager}"), how));
     }
-    let was = format!("hc {}", env!("CARGO_PKG_VERSION"));
+    let was = format!("hc {}", crate::releases::VERSION);
     let now = version_of(from).ok_or_else(|| refused(format!("{} is not a working hc", from.display()), ""))?;
+    if let Some(releases) = crate::releases::FORK_RELEASES
+        && crate::releases::fork_build(&now).is_none()
+    {
+        return Err(refused(format!("{now} is from another channel"), releases));
+    }
     if older(&now, &was) && !force {
         return Err(refused(format!("{now} is older than this {was}"), "--force to go back anyway"));
     }

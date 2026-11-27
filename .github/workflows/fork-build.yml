@@ -1,0 +1,110 @@
+name: Build fork Core
+
+on:
+  push:
+    branches: [master, codex/fork-suite]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  HERDR_CORE_FORK_RELEASES: https://github.com/xuhuanhello/herdr-core/releases
+
+jobs:
+  build:
+    if: github.repository == 'xuhuanhello/herdr-core'
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { target: windows-x86_64, runner: windows-2022 }
+          - { target: macos-aarch64, runner: macos-26 }
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 45
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          submodules: true
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # master
+        with:
+          toolchain: 1.95.0
+      - uses: mlugg/setup-zig@d1434d08867e3ee9daa34448df10607b98908d29 # v2.2.1
+        with:
+          version: 0.16.0
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+        with:
+          key: fork-core-zig-0.16.0-${{ matrix.target }}
+          cache-workspace-crates: true
+          cache-bin: false
+      - name: Build Core
+        run: |
+          version=$(sed -n 's/^version = "\(.*\)"/\1/p' crates/herdr-core/Cargo.toml | head -1)
+          export HERDR_CORE_FORK_VERSION="$version+fork.xuhuanhello.$GITHUB_RUN_NUMBER"
+          cargo build --release --locked -p herdr-core
+          echo "HERDR_CORE_FORK_VERSION=$HERDR_CORE_FORK_VERSION" >> "$GITHUB_ENV"
+      - name: Pack macOS
+        if: runner.os == 'macOS'
+        run: |
+          bin=target/release/herdr-core
+          bundle='target/release/Herdr Core.app'
+          test "$("$bin" --version)" = "hc $HERDR_CORE_FORK_VERSION"
+          sh scripts/mac-bundle "$bin" "$bundle"
+          codesign --force --sign - "$bin"
+          codesign --force --sign - "$bundle"
+          codesign --verify --strict "$bundle"
+          mkdir -p dist
+          sh scripts/package "$bundle" dist/herdr-core-macos-aarch64.tar.gz
+      - name: Pack Windows
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $bin = "target/release/herdr-core.exe"
+          if ((& $bin --version) -ne "hc $env:HERDR_CORE_FORK_VERSION") { throw "unexpected Core version" }
+          $text = [Text.Encoding]::ASCII.GetString([IO.File]::ReadAllBytes($bin)).ToLower()
+          foreach ($dll in "vcruntime140", "msvcp140", "api-ms-win-crt-") { if ($text.Contains($dll)) { throw "herdr-core.exe imports $dll" } }
+          New-Item -ItemType Directory -Force stage/THIRD-PARTY-NOTICES, dist | Out-Null
+          Copy-Item $bin, LICENSE stage/
+          Copy-Item crates/herdr-core/THIRD-PARTY-NOTICES stage/THIRD-PARTY-NOTICES/herdr-core.txt
+          scripts/fetch-conpty.ps1 -Dest stage
+          Copy-Item distribution/windows/* stage/THIRD-PARTY-NOTICES/
+          tar -a -cf dist/herdr-core-windows-x86_64.zip -C stage herdr-core.exe conpty LICENSE THIRD-PARTY-NOTICES
+          if ($LASTEXITCODE) { throw "zip failed" }
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: herdr-core-${{ matrix.target }}
+          path: dist/herdr-core-${{ matrix.target }}.*
+          if-no-files-found: error
+          retention-days: 7
+
+  publish:
+    if: >-
+      github.repository == 'xuhuanhello/herdr-core'
+      && github.event_name == 'push'
+      && github.ref_name == github.event.repository.default_branch
+    needs: build
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    concurrency:
+      group: fork-core-release
+      cancel-in-progress: false
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          pattern: herdr-core-*
+          path: dist
+          merge-multiple: true
+      - name: Publish the verified Core packages
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: python3 scripts/fork-release.py
