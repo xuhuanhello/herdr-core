@@ -1,4 +1,10 @@
 use super::*;
+
+#[test]
+fn compares_successive_fork_builds_of_the_same_core_version() {
+    assert!(older("hc 0.1.22+fork.xuhuanhello.9", "hc 0.1.22+fork.xuhuanhello.10"));
+    assert!(!older("hc 0.1.22+fork.xuhuanhello.10", "hc 0.1.22+fork.xuhuanhello.9"));
+}
 use clap::CommandFactory;
 
 fn parsed(args: &[&str]) -> Cmd {

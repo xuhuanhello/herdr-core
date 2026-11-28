@@ -511,7 +511,7 @@ pub fn install(paths: &crate::paths::Paths, to: Reach, session: Option<&str>) ->
     let bin = if there == here && (bundle || !current.ends_with("Herdr Core.app/Contents/MacOS/herdr-core")) {
         current
     } else {
-        let version = env!("CARGO_PKG_VERSION");
+        let version = crate::releases::VERSION;
         let not_released = |_| {
             RpcError::new(
                 "install_failed",
@@ -582,7 +582,7 @@ fn install_payload(bin: &Path, scratch: &Path) -> Result<(Vec<u8>, bool), RpcErr
 /// swaps an hc already there the planned way, so its terminals keep running.
 fn install_windows(paths: &crate::paths::Paths, target: &str, session: Option<&str>) -> Result<String, RpcError> {
     let scratch = crate::releases::Scratch::new()?;
-    let version = env!("CARGO_PKG_VERSION");
+    let version = crate::releases::VERSION;
     let m = crate::releases::manifest(Some(version), &scratch.0).map_err(|_| {
         RpcError::new(
             "install_failed",

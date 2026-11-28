@@ -9,6 +9,25 @@ use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
+pub(crate) const FORK_RELEASES: Option<&str> = option_env!("HERDR_CORE_FORK_RELEASES");
+pub(crate) const VERSION: &str = match option_env!("HERDR_CORE_FORK_VERSION") {
+    Some(version) => version,
+    None => env!("CARGO_PKG_VERSION"),
+};
+
+pub(crate) fn fork_build(version: &str) -> Option<u64> {
+    let (base, build) = version.trim_start_matches("hc ").split_once("+fork.xuhuanhello.")?;
+    let parts: Vec<_> = base.split('.').collect();
+    if parts.len() != 3
+        || parts.iter().any(|part| part.parse::<u64>().is_err())
+        || build.starts_with('0')
+        || !build.bytes().all(|byte| byte.is_ascii_digit())
+    {
+        return None;
+    }
+    build.parse().ok()
+}
+
 #[derive(Deserialize)]
 pub struct Manifest {
     pub version: String,
@@ -30,12 +49,18 @@ fn base() -> String {
 }
 
 fn unavailable(why: String) -> RpcError {
-    RpcError::new("unavailable", why, "check your connection; the releases are at releases.herdr.dev")
+    let hint =
+        format!("check your connection; releases are at {}", FORK_RELEASES.unwrap_or("https://releases.herdr.dev"));
+    RpcError::new("unavailable", why, &hint)
 }
 
 fn curl(url: &str, to: &Path) -> Result<(), RpcError> {
     // Quiet: our error says what failed, and piped stderr is one JSON error.
-    let ok = Command::new("curl")
+    let mut command = Command::new("curl");
+    if FORK_RELEASES.is_some() {
+        command.args(["-q", "--proto", "=https", "--proto-redir", "=https"]);
+    }
+    let ok = command
         .args(["-fsL", "--retry", "2", "--connect-timeout", "10", "-o"])
         .arg(to)
         .arg(url)
@@ -49,14 +74,31 @@ fn curl(url: &str, to: &Path) -> Result<(), RpcError> {
 
 /// The latest release's list, or one version's.
 pub fn manifest(version: Option<&str>, scratch: &Path) -> Result<Manifest, RpcError> {
-    let url = match version {
-        Some(v) => format!("{}/core/{v}/manifest.json", base()),
-        None => format!("{}/core/latest.json", base()),
+    let url = if let Some(releases) = FORK_RELEASES {
+        match version {
+            Some(v) => {
+                let build = fork_build(v).ok_or_else(|| unavailable(format!("{} is not a fork release", v)))?;
+                format!("{releases}/download/fork-{build}/manifest.json")
+            }
+            None => format!("{releases}/latest/download/manifest.json"),
+        }
+    } else {
+        match version {
+            Some(v) => format!("{}/core/{v}/manifest.json", base()),
+            None => format!("{}/core/latest.json", base()),
+        }
     };
     let file = scratch.join("manifest.json");
     curl(&url, &file)?;
     let bytes = std::fs::read(&file).map_err(|e| unavailable(e.to_string()))?;
-    serde_json::from_slice(&bytes).map_err(|e| unavailable(format!("{url} is not a release list: {e}")))
+    let manifest: Manifest =
+        serde_json::from_slice(&bytes).map_err(|e| unavailable(format!("{url} is not a release list: {e}")))?;
+    if FORK_RELEASES.is_some()
+        && (fork_build(&manifest.version).is_none() || version.is_some_and(|v| v != manifest.version))
+    {
+        return Err(unavailable(format!("{url} returned an unexpected fork version")));
+    }
+    Ok(manifest)
 }
 
 /// Windows' own tar opens zips; Git Bash's GNU tar, often first on PATH there, can't.
@@ -112,7 +154,14 @@ pub fn fetch(m: &Manifest, target: &str, scratch: &Path) -> Result<PathBuf, RpcE
         RpcError::new("refused", format!("hc {} has no build for {target}", m.version), "install hc there yourself")
     })?;
     let archive = if target.starts_with("windows") { "zip" } else { "tar.gz" };
-    let file = scratch.join(format!("herdr-core-{target}.{archive}"));
+    let name = format!("herdr-core-{target}.{archive}");
+    if let Some(releases) = FORK_RELEASES {
+        let build = fork_build(&m.version).ok_or_else(|| unavailable("invalid fork release version".into()))?;
+        if t.url != format!("{releases}/download/fork-{build}/{name}") {
+            return Err(unavailable(format!("unexpected Core download URL: {}", t.url)));
+        }
+    }
+    let file = scratch.join(name);
     curl(&t.url, &file)?;
     if sha256(&file).as_deref() != Some(t.sha256.as_str()) {
         return Err(RpcError::new(
@@ -145,4 +194,17 @@ impl Drop for Scratch {
 /// This machine as release targets name it: `linux-x86_64`, `macos-aarch64`.
 pub fn this_target() -> String {
     format!("{}-{}", std::env::consts::OS, std::env::consts::ARCH)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::fork_build;
+
+    #[test]
+    fn release_build_number_belongs_to_this_fork() {
+        assert_eq!(fork_build("hc 0.1.22+fork.xuhuanhello.10"), Some(10));
+        for version in ["0.1.22", "0.1.22+fork.other.10", "0.1.22+fork.xuhuanhello.0", "0.1.22+fork.xuhuanhello.01"] {
+            assert_eq!(fork_build(version), None);
+        }
+    }
 }

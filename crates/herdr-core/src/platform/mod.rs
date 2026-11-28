@@ -181,7 +181,9 @@ pub fn core_executable(exe: &std::path::Path) -> std::path::PathBuf {
 pub fn prefer_release_bundle() -> bool {
     #[cfg(target_os = "macos")]
     {
-        std::env::current_exe().is_ok_and(|exe| macos_bundle::bundle_destination(&exe))
+        std::env::current_exe()
+            .and_then(|exe| exe.canonicalize())
+            .is_ok_and(|exe| macos_bundle::source_is_bundle(&exe) || macos_bundle::bundle_destination(&exe))
     }
     #[cfg(not(target_os = "macos"))]
     true
@@ -206,8 +208,9 @@ pub fn legacy_bundle_notice(state: &std::path::Path) {
 pub fn verify_release_bundle(path: &std::path::Path) -> std::io::Result<()> {
     #[cfg(target_os = "macos")]
     if macos_bundle::source_is_bundle(path) {
-        let local = std::env::var("HERDR_RELEASES_URL")
-            .is_ok_and(|url| url.trim_end_matches('/') != "https://releases.herdr.dev");
+        let local = crate::releases::FORK_RELEASES.is_some()
+            || std::env::var("HERDR_RELEASES_URL")
+                .is_ok_and(|url| url.trim_end_matches('/') != "https://releases.herdr.dev");
         macos_bundle::verify(path.parent().unwrap().parent().unwrap().parent().unwrap(), local)?;
     }
     Ok(())

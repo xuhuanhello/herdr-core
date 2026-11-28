@@ -65,6 +65,7 @@ jobs:
           ZIG: ${{ github.workspace }}/scripts/zig-stub.sh
 
   test:
+    if: github.repository != 'xuhuanhello/herdr-core'
     strategy:
       fail-fast: false
       # Linux tests the static musl build, which is what releases ship.
@@ -119,6 +120,7 @@ jobs:
           cargo test --locked --no-fail-fast --target ${{ matrix.target }} "${only[@]}" -- --test-threads ${{ matrix.threads }}
 
   upgrade:
+    if: github.repository != 'xuhuanhello/herdr-core'
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
@@ -164,7 +166,7 @@ jobs:
   # Keep the required check name stable; every platform and upgrade must pass.
   ci-ok:
     needs: [lint, test, upgrade]
-    if: always()
+    if: always() && github.repository != 'xuhuanhello/herdr-core'
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:

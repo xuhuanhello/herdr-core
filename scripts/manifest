@@ -17,11 +17,17 @@ version = re.search(r'^version = "(.+)"', cargo, re.M).group(1)
 api = (root / "crates/herdr-core/src/api.rs").read_text()
 generation = int(re.search(r"pub const GENERATION: u32 = (\d+);", api).group(1))
 base = os.environ.get("RELEASES_URL", "https://releases.herdr.dev").rstrip("/")
+build = os.environ.get("HERDR_CORE_FORK_BUILD")
+if build:
+    version += f"+fork.xuhuanhello.{build}"
+    directory = f"{os.environ['HERDR_CORE_FORK_RELEASES'].rstrip('/')}/download/fork-{build}"
+else:
+    directory = f"{base}/core/{version}"
 
 targets = {}
 for f in sorted([*pathlib.Path(sys.argv[1]).glob("herdr-core-*.tar.gz"), *pathlib.Path(sys.argv[1]).glob("herdr-core-*.zip")]):
     name = f.name.removeprefix("herdr-core-").removesuffix(".tar.gz").removesuffix(".zip")
-    targets[name] = {"url": f"{base}/core/{version}/{f.name}", "sha256": hashlib.sha256(f.read_bytes()).hexdigest()}
+    targets[name] = {"url": f"{directory}/{f.name}", "sha256": hashlib.sha256(f.read_bytes()).hexdigest()}
 if not targets:
     sys.exit(f"manifest: no herdr-core-*.tar.gz or .zip in {sys.argv[1]}")
 
